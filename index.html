@@ -192,6 +192,7 @@ td{padding:9px 12px;color:#e2e8f0;font-family:var(--font-texto)}
 .ai-pill{display:inline-block;min-width:52px;text-align:center;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700}
 .ai-eco{color:#fdba74;font-weight:700}
 .ai-tabela-scroll{max-height:620px;overflow:auto}
+#custoResumo .kpi{background:#0A2144}
 </style>
 </head>
 <body>
@@ -331,13 +332,16 @@ td{padding:9px 12px;color:#e2e8f0;font-family:var(--font-texto)}
     <span class="filtro-label">Mês:</span>
     <select id="filtroMes" onchange="renderCustoTable()"></select>
   </div>
+  <div class="kpi-grid" id="custoResumo" style="margin-bottom:14px"></div>
+  <div id="custoBarra" style="margin-bottom:22px"></div>
   <div class="table-wrap">
     <table id="custoTable">
       <thead><tr>
         <th>Rgk</th><th>Gerente</th>
-        <th class="num">Meta Mês</th><th class="num">Saldo Orçamento</th><th class="num">Disponível p/ gastar</th>
-        <th class="num">Meta até a data</th><th class="num">Realizado até a data</th>
-        <th class="num">%</th><th class="num">Tendência Mês</th>
+        <th class="num">Orçamento Mês</th><th class="num">Realizado até a data</th><th class="num">% Consumido</th>
+        <th class="num">Disponível p/ gastar</th><th class="num">% Disponível</th>
+        <th class="num">Dias úteis restantes</th><th class="num">Disponível por dia útil</th>
+        <th class="num">Meta até a data</th><th class="num">% vs meta até a data</th><th class="num">Tendência Mês</th>
       </tr></thead>
       <tbody id="custoTbody"></tbody>
     </table>
@@ -1157,13 +1161,18 @@ function calcularPacing(base, gerentes, hoje){
     a.meta_mes += r.orc; a.realizado += r.real; a.meta_corte += metaCorte; a.tendencia += tend;
   }
   const r2 = v=>Math.round(v*100)/100;
+  const hojeD = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate());
   for(const m in out) for(const g in out[m]){
     const a = out[m][g];
+    // Dias úteis que ainda restam no mês, contando hoje (regime principal da gerência)
+    const reg = a.reg || 'Segunda a sexta', du = du_(m, reg);
+    const hojeUtil = (_MESES_PACING.indexOf(m)===hojeD.getMonth() && hojeD.getFullYear()===2026 && _ehDiaUtil(hojeD, reg)) ? 1 : 0;
+    a.du_total = du.total; a.du_rest = Math.max(0, du.total - du.decorridos + hojeUtil); a.reg = reg;
     const metaMes=r2(a.meta_mes), realizado=r2(a.realizado), metaCorte=r2(a.meta_corte);
     out[m][g] = {meta_mes:metaMes, saldo_pct: metaMes>0 ? r2(realizado/metaMes*100) : 0,
       meta_corte:metaCorte, realizado,
       pct: metaCorte>0 ? Math.round((realizado/metaCorte-1)*1000)/10 : (a.soFixo ? null : 0),
-      tendencia:r2(a.tendencia)};
+      tendencia:r2(a.tendencia), reg:a.reg, du_total:a.du_total, du_rest:a.du_rest};
   }
   return out;
 }
@@ -2454,20 +2463,27 @@ function renderCustoTable(){
   const validos = rows.filter(r=>r.pct!==null);
   const melhorG = validos.length ? validos.reduce((a,b)=>b.pct<a.pct?b:a).g : null;
 
+  const corDisp = v => v>=0 ? '#6ee7b7' : '#fca5a5';
+  const brl0 = v => 'R$ '+fmtN(v,0);
   rows.forEach((row,i)=>{
-    const {g,meta_mes,saldo_pct,meta_corte,realizado,pct,tendencia}=row;
+    const {g,meta_mes,saldo_pct,meta_corte,realizado,pct,tendencia,du_rest}=row;
     const semOrcamento = pct===null;
     const ok=!semOrcamento && pct<=0; const warn=!semOrcamento && pct>0&&pct<=15; const err=!semOrcamento && pct>15;
     const cor = semOrcamento?'#898989':ok?'#6ee7b7':err?'#fca5a5':'#fdba74';
     const trofeu = g===melhorG ? ' 🏆' : '';
+    const disp = meta_mes - realizado, pDisp = meta_mes>0 ? disp/meta_mes*100 : 0;
+    const porDia = (meta_mes>0 && du_rest>0) ? disp/du_rest : null;
     _rowsHtml.push(`<tr>
       <td style="background:${corRank(i,rows.length)};font-weight:700">${i+1}</td>
       <td><b>${g}</b>${trofeu}</td>
       <td class="num">${meta_mes>0?fmtN(meta_mes,0):'—'}</td>
-      <td class="num">${meta_mes>0?fmtN(saldo_pct,2)+'%':'—'}</td>
-      <td class="num" style="color:${meta_mes>0?(meta_mes-realizado>=0?'#6ee7b7':'#fca5a5'):'#898989'};font-weight:700">${meta_mes>0?fmtN(meta_mes-realizado,0):'—'}</td>
-      <td class="num">${meta_corte>0?fmtN(meta_corte,0):'—'}</td>
       <td class="num">${fmtN(realizado,0)}</td>
+      <td class="num">${meta_mes>0?fmtN(saldo_pct,2)+'%':'—'}</td>
+      <td class="num" style="color:${meta_mes>0?corDisp(disp):'#898989'};font-weight:800;font-size:13px">${meta_mes>0?brl0(disp):'Sem orçamento'}</td>
+      <td class="num" style="color:${meta_mes>0?corDisp(disp):'#898989'}">${meta_mes>0?fmtN(pDisp,1)+'%':'—'}</td>
+      <td class="num">${meta_mes>0?(du_rest!=null?du_rest:'—'):'—'}</td>
+      <td class="num" style="color:${porDia==null?'#898989':corDisp(porDia)}">${porDia==null?(meta_mes>0&&disp<0?'Estourado':'—'):brl0(porDia)+'/dia'}</td>
+      <td class="num">${meta_corte>0?fmtN(meta_corte,0):'—'}</td>
       <td class="num" style="color:${cor}">${semOrcamento?'Sem orçamento':(pct>0?'+':'')+fmtN(pct,1)+'%'}</td>
       <td class="num">${fmtN(tendencia,0)}</td>
     </tr>`);
@@ -2476,20 +2492,47 @@ function renderCustoTable(){
   // Linha de total geral
   const tot = rows.reduce((acc,r)=>({
     meta_mes:acc.meta_mes+r.meta_mes, realizado:acc.realizado+r.realizado,
-    meta_corte:acc.meta_corte+r.meta_corte, tendencia:acc.tendencia+r.tendencia
-  }), {meta_mes:0,realizado:0,meta_corte:0,tendencia:0});
+    meta_corte:acc.meta_corte+r.meta_corte, tendencia:acc.tendencia+r.tendencia,
+    du_rest:Math.max(acc.du_rest, r.meta_mes>0?(r.du_rest||0):0)
+  }), {meta_mes:0,realizado:0,meta_corte:0,tendencia:0,du_rest:0});
   const totSaldo = tot.meta_mes>0 ? tot.realizado/tot.meta_mes*100 : 0;
   const totPct = tot.meta_corte>0 ? (tot.realizado/tot.meta_corte-1)*100 : 0;
+  const totDisp = tot.meta_mes - tot.realizado, totPDisp = tot.meta_mes>0 ? totDisp/tot.meta_mes*100 : 0;
+  const totDia = tot.du_rest>0 ? totDisp/tot.du_rest : null;
   _rowsHtml.push(`<tr style="background:rgba(255,255,255,.08);font-weight:800">
     <td></td><td>Total Geral</td>
     <td class="num">${fmtN(tot.meta_mes,0)}</td>
-    <td class="num">${fmtN(totSaldo,2)}%</td>
-    <td class="num" style="color:${tot.meta_mes-tot.realizado>=0?'#6ee7b7':'#fca5a5'}">${fmtN(tot.meta_mes-tot.realizado,0)}</td>
-    <td class="num">${fmtN(tot.meta_corte,0)}</td>
     <td class="num">${fmtN(tot.realizado,0)}</td>
+    <td class="num">${fmtN(totSaldo,2)}%</td>
+    <td class="num" style="color:${corDisp(totDisp)};font-size:13px">${brl0(totDisp)}</td>
+    <td class="num" style="color:${corDisp(totDisp)}">${fmtN(totPDisp,1)}%</td>
+    <td class="num">${tot.du_rest}</td>
+    <td class="num" style="color:${totDia==null?'#898989':corDisp(totDia)}">${totDia==null?(totDisp<0?'Estourado':'—'):brl0(totDia)+'/dia'}</td>
+    <td class="num">${fmtN(tot.meta_corte,0)}</td>
     <td class="num" style="color:${totPct<=0?'#6ee7b7':'#fca5a5'}">${totPct>0?'+':''}${fmtN(totPct,1)}%</td>
     <td class="num">${fmtN(tot.tendencia,0)}</td>
   </tr>`);
+
+  // ── Resumo: quanto ainda está disponível no orçamento ──
+  const estouroPrev = tot.tendencia - tot.meta_mes;
+  const cards = [
+    {label:'Orçamento do mês', value:fmt(tot.meta_mes), sub:mes+'/2026', icon:'📋'},
+    {label:'Já gasto (realizado)', value:fmt(tot.realizado), sub:fmtN(totSaldo,1)+'% do orçamento consumido', icon:'💳'},
+    {label:'Ainda disponível para gastar', value:fmt(totDisp), sub: totDisp>=0 ? fmtN(totPDisp,1)+'% do orçamento ainda livre' : 'Orçamento estourado em '+fmt(-totDisp), icon:'💰', cls: totDisp>=0?'verde':'verm'},
+    {label:'Disponível por dia útil', value: totDia==null ? (totDisp<0?'Estourado':'—') : fmt(totDia), sub: tot.du_rest>0 ? tot.du_rest+' dia(s) útil(eis) restante(s), contando hoje' : 'Mês encerrado', icon:'📅', cls: totDia==null?'':(totDia>=0?'verde':'verm')},
+    {label:'Tendência de fechamento', value:fmt(tot.tendencia), sub: tot.meta_mes>0 ? (estouroPrev>0 ? 'Deve estourar em '+fmt(estouroPrev) : 'Deve sobrar '+fmt(-estouroPrev)) : '—', icon:'📈', cls: estouroPrev>0?'verm':'verde'},
+  ];
+  document.getElementById('custoResumo').innerHTML = cards.map(k=>
+    `<div class="kpi ${k.cls||''}"><div class="kpi-icon">${k.icon}</div><div class="kpi-label">${k.label}</div>
+      <div class="kpi-value">${k.value}</div><div class="kpi-sub">${k.sub}</div></div>`).join('');
+  const pc = tot.meta_mes>0 ? Math.min(100, tot.realizado/tot.meta_mes*100) : 0;
+  document.getElementById('custoBarra').innerHTML = tot.meta_mes>0 ? `
+    <div style="display:flex;justify-content:space-between;font-size:12px;color:#c7d2e6;margin-bottom:6px">
+      <span>Consumido: <b style="color:#fff">${fmtN(totSaldo,1)}%</b></span>
+      <span>Disponível: <b style="color:${corDisp(totDisp)}">${fmt(totDisp)}</b></span></div>
+    <div style="display:flex;height:22px;border-radius:6px;overflow:hidden;background:#0A2144">
+      <div style="width:${pc}%;background:${totDisp>=0?'#EC6A1D':'#C00000'}"></div>
+      <div style="width:${100-pc}%;background:#1E7145"></div></div>` : '';
 
   tbody.innerHTML=_rowsHtml.join('');
 
@@ -4467,6 +4510,8 @@ const ACESSOS = [
   {acesso:"Amanda_BEQ", hash:'8cc1b894decb48dcaff99ee016057ccea09075a41e7c767b60952cf4a76936b2', tipo:'Limitado', visoes:["Amanda"], precoUF:"CE"},
   {acesso:"Silvio_BEQ", hash:'3f9deece05232a5e81755ddfadbb6b5e53a058a40cf40f95a552bca37844c699', tipo:'Limitado', visoes:["Silvio"], precoUF:"BA"},
   {acesso:"Thiago_BEQ", hash:'2b3444a1976069ccfe2772c609ed9e5e9d5a48d38e95572002273013ee3371a1', tipo:'Limitado', visoes:["Thiago"], precoUF:"CE"},
+  {acesso:"Renan_BEQ", hash:'4db90f36e41597f69ba5e71e5590f977ec0517e6f6816350e8d5c3903d646855', tipo:'Limitado', visoes:["Thiago"], precoUF:"CE"},
+  {acesso:"Biatriz_BEQ", hash:'1d35c8e9408b9e5e40d6da055f197f057004ea3758aab489a05f06867ab47580', tipo:'Limitado', visoes:["Thiago"], precoUF:"CE"},
   {acesso:"ThiagoLPT_BEQ", hash:'64719639d44ed4ed2585164e60ecc5eb6754e3f37bdad8ce9ac78d71dd8abf61', tipo:'Limitado', visoes:["Thiago LPT PI"], precoUF:"PI"},
   {acesso:"Richardson_BEQ", hash:'1eebea1bd661b646317859862622992c198b7e54cf944818b750c14ade7e3e8a', tipo:'Limitado', visoes:["Richardson"], precoUF:"BA"},
   {acesso:"Valdison_BEQ", hash:'568da46b17c048ec9be0e23671f3bbe9974b95a7ea13dbf69993b47d2cd8ec92', tipo:'Limitado', visoes:["Valdison"], precoUF:"RN"},
